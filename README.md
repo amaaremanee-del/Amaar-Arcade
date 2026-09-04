@@ -1,2 +1,0 @@
-# Amaar-Arcade
-The Arcade
