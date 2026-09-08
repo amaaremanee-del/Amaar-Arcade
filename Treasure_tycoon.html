@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Treasure Tycoon</title>
+  <style>
+    body {
+      background: #111;
+      color: #fff;
+      font-family: Arial;
+      text-align: center;
+    }
+    button {
+      padding: 12px 20px;
+      margin: 10px;
+      font-size: 18px;
+      cursor: pointer;
+      border-radius: 8px;
+      background: #e91e63;
+      border: none;
+      color: white;
+    }
+    #stats {
+      margin-top: 20px;
+      font-size: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Treasure Tycoon</h1>
+  <p>Grow gold, buy upgrades, survive random events!</p>
+
+  <div id="stats"></div>
+
+  <button onclick="nextTurn()">Next Turn</button>
+  <button onclick="openShop()">Shop</button>
+
+  <div id="shop" style="display:none;">
+    <h2>Shop</h2>
+    <button onclick="buyMine()">Buy Mine (150 gold)</button><br>
+    <button onclick="buyShip()">Buy Ship (300 gold)</button><br>
+    <button onclick="buyGuard()">Hire Guard (200 gold)</button><br>
+    <button onclick="closeShop()">Close</button>
+  </div>
+
+  <p id="event"></p>
+
+  <script>
+    let gold = 100;
+    let income = 10;
+    let mines = 0;
+    let ships = 0;
+    let guards = 0;
+
+    function updateStats() {
+      document.getElementById("stats").innerHTML =
+        "Gold: " + gold + "<br>" +
+        "Income per turn: " + income + "<br>" +
+        "Mines: " + mines + "<br>" +
+        "Ships: " + ships + "<br>" +
+        "Guards: " + guards;
+    }
+
+    function nextTurn() {
+      gold += income;
+      let eventText = "";
+      let event = Math.floor(Math.random() * 10);
+
+      if (event === 0) {
+        let loss = guards > 0 ? gold / 10 : gold / 4;
+        gold -= Math.floor(loss);
+        eventText = "Bandits attacked! Lost " + Math.floor(loss) + " gold.";
+      } else if (event === 1) {
+        if (ships > 0) {
+          let loss = ships * 5;
+          gold -= loss;
+          eventText = "Storm damaged your ships! Lost " + loss + " gold.";
+        }
+      } else if (event === 2) {
+        let bonus = Math.floor(Math.random() * 200) + 50;
+        gold += bonus;
+        eventText = "Found hidden treasure! +" + bonus + " gold.";
+      } else if (event === 3 && guards > 0) {
+        let bonus = guards * 15;
+        gold += bonus;
+        eventText = "Guards secured bonus treasure! +" + bonus + " gold.";
+      }
+
+      document.getElementById("event").innerText = eventText;
+      updateStats();
+    }
+
+    function openShop() {
+      document.getElementById("shop").style.display = "block";
+    }
+
+    function closeShop() {
+      document.getElementById("shop").style.display = "none";
+    }
+
+    function buyMine() {
+      if (gold >= 150) {
+        gold -= 150;
+        income += 10;
+        mines++;
+        updateStats();
+      }
+    }
+
+    function buyShip() {
+      if (gold >= 300) {
+        gold -= 300;
+        income += 20;
+        ships++;
+        updateStats();
+      }
+    }
+
+    function buyGuard() {
+      if (gold >= 200) {
+        gold -= 200;
+        guards++;
+        updateStats();
+      }
+    }
+
+    updateStats();
+  </script>
+</body>
+</html>

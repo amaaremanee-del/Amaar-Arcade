@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Memory Match</title>
+  <style>
+    body {
+      background: #111;
+      color: #fff;
+      font-family: Arial;
+      text-align: center;
+    }
+    #game {
+      display: grid;
+      grid-template-columns: repeat(4, 100px);
+      grid-gap: 10px;
+      justify-content: center;
+      margin-top: 40px;
+    }
+    .card {
+      width: 100px;
+      height: 100px;
+      background: #333;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 40px;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    .flipped {
+      background: #ff4081;
+    }
+  </style>
+</head>
+<body>
+  <h1>Memory Match</h1>
+  <p>Match all the pairs!</p>
+
+  <div id="game"></div>
+
+  <script>
+    const emojis = ["🍎","🍌","🍇","🍒","🍉","🍓","🍍","🥝"];
+    let cards = [...emojis, ...emojis];
+    cards.sort(() => Math.random() - 0.5);
+
+    const game = document.getElementById("game");
+    let flipped = [];
+    let matched = 0;
+
+    cards.forEach((emoji, index) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.dataset.index = index;
+      card.dataset.emoji = emoji;
+      card.innerHTML = "";
+      card.onclick = () => flipCard(card);
+      game.appendChild(card);
+    });
+
+    function flipCard(card) {
+      if (flipped.length === 2 || card.classList.contains("flipped")) return;
+
+      card.classList.add("flipped");
+      card.innerHTML = card.dataset.emoji;
+      flipped.push(card);
+
+      if (flipped.length === 2) {
+        setTimeout(checkMatch, 600);
+      }
+    }
+
+    function checkMatch() {
+      const [c1, c2] = flipped;
+
+      if (c1.dataset.emoji === c2.dataset.emoji) {
+        matched += 2;
+        if (matched === cards.length) {
+          alert("You win!");
+        }
+      } else {
+        c1.classList.remove("flipped");
+        c2.classList.remove("flipped");
+        c1.innerHTML = "";
+        c2.innerHTML = "";
+      }
+
+      flipped = [];
+    }
+  </script>
+</body>
+</html>
