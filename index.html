@@ -1,129 +1,657 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Treasure Tycoon</title>
-  <style>
-    body {
-      background: #111;
-      color: #fff;
-      font-family: Arial;
-      text-align: center;
-    }
-    button {
-      padding: 12px 20px;
-      margin: 10px;
-      font-size: 18px;
-      cursor: pointer;
-      border-radius: 8px;
-      background: #e91e63;
-      border: none;
-      color: white;
-    }
-    #stats {
-      margin-top: 20px;
-      font-size: 20px;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Shadow Assassin – Hard Boss Edition</title>
+
+<style>
+  body { margin:0; background:#0a0012; color:#fff; overflow:hidden; font-family:Arial; }
+  #gameCanvas { display:none; background:linear-gradient(#0a0012,#1a0030); }
+
+  #menu, #upgrades, #deathMenu {
+    position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%); text-align:center;
+  }
+
+  #hud { position:absolute; top:10px; left:10px; display:none; }
+
+  .bar { width:200px; height:8px; background:#333; margin-bottom:6px; border-radius:4px; }
+  .bar-fill { height:100%; background:#b300ff; }
+</style>
 </head>
+
 <body>
-  <h1>Treasure Tycoon</h1>
-  <p>Grow gold, buy upgrades, survive random events!</p>
 
-  <div id="stats"></div>
+<!-- GAME CANVAS -->
+<canvas id="gameCanvas" width="960" height="540"></canvas>
 
-  <button onclick="nextTurn()">Next Turn</button>
-  <button onclick="openShop()">Shop</button>
+<!-- MAIN MENU -->
+<div id="menu">
+  <h1>SHADOW ASSASSIN</h1>
+  <button onclick="startGame()">Start Game</button>
+  <button onclick="openUpgrades()">Upgrades</button>
+</div>
 
-  <div id="shop" style="display:none;">
-    <h2>Shop</h2>
-    <button onclick="buyMine()">Buy Mine (150 gold)</button><br>
-    <button onclick="buyShip()">Buy Ship (300 gold)</button><br>
-    <button onclick="buyGuard()">Hire Guard (200 gold)</button><br>
-    <button onclick="closeShop()">Close</button>
-  </div>
+<!-- UPGRADES MENU -->
+<div id="upgrades" style="display:none;">
+  <h1>Upgrades</h1>
+  Gold: <span id="goldText">0</span><br><br>
 
-  <p id="event"></p>
+  Damage Level: <span id="dmgLvlText">1</span><br>
+  <button onclick="buyDamage()">Upgrade Damage (20 gold)</button><br><br>
 
-  <script>
-    let gold = 100;
-    let income = 10;
-    let mines = 0;
-    let ships = 0;
-    let guards = 0;
+  Max HP Level: <span id="hpLvlText">1</span><br>
+  <button onclick="buyHP()">Upgrade Max HP (20 gold)</button><br><br>
 
-    function updateStats() {
-      document.getElementById("stats").innerHTML =
-        "Gold: " + gold + "<br>" +
-        "Income per turn: " + income + "<br>" +
-        "Mines: " + mines + "<br>" +
-        "Ships: " + ships + "<br>" +
-        "Guards: " + guards;
+  <button onclick="backToMenu()">Back</button>
+</div>
+
+<!-- DEATH MENU -->
+<div id="deathMenu" style="display:none;">
+  <h1>You Died</h1>
+  <button onclick="continueLevel()">Continue</button>
+  <button onclick="openUpgrades()">Upgrades</button>
+</div>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="bar"><div id="hpBar" class="bar-fill"></div></div>
+  <div class="bar"><div id="staminaBar" class="bar-fill" style="background:#6a00ff;"></div></div>
+  <div class="bar"><div id="bossHpBar" class="bar-fill" style="background:#ff00aa;"></div></div>
+
+  Gold: <span id="goldHud">0</span><br>
+  Level: <span id="levelHud">1</span><br>
+  WASD = move | Space = jump | J = attack
+</div>
+
+<!-- FULL GAME SCRIPT -->
+<script>
+window.onload = function() {
+
+  /* ============================
+     DOM ELEMENTS
+  ============================ */
+
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const menu = document.getElementById("menu");
+  const upgrades = document.getElementById("upgrades");
+  const hud = document.getElementById("hud");
+  const deathMenu = document.getElementById("deathMenu");
+
+  const goldText = document.getElementById("goldText");
+  const dmgLvlText = document.getElementById("dmgLvlText");
+  const hpLvlText = document.getElementById("hpLvlText");
+
+  const goldHud = document.getElementById("goldHud");
+  const levelHud = document.getElementById("levelHud");
+
+  const hpBar = document.getElementById("hpBar");
+  const staminaBar = document.getElementById("staminaBar");
+  const bossHpBar = document.getElementById("bossHpBar");
+
+  /* ============================
+     INPUT
+  ============================ */
+
+  const keys = {};
+  document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+  document.addEventListener("keyup",   e => keys[e.key.toLowerCase()] = false);
+
+  let gameRunning = false;
+
+  /* ============================
+     PLAYER + BOSS STATS
+  ============================ */
+
+  let gold = 0;
+  let damageLevel = 1;
+  let hpLevel = 1;
+
+  let player = {
+    x: 200, y: 380, z: 0,
+    vx: 0, vy: 0, vz: 0,
+    w: 40, h: 90,
+    facing: 1,
+    onGround: false,
+    attacking: false,
+    attackFrame: 0,
+    baseDamage: 10,
+    maxHpBase: 100,
+    hp: 100
+  };
+
+  let boss = {
+    x: 650, y: 320, z: 0,
+    w: 140, h: 180,
+    hpBase: 300,
+    hp: 300,
+    alive: true,
+    attackTimer: 0,
+    daggerTimer: 0,
+
+    // HARD MODE
+    speed: 2.4,
+    dashSpeed: 12,
+    dashCooldown: 0,
+    rage: false
+  };
+
+  let level = 1;
+  const GRAVITY = 0.7;
+
+  /* ============================
+     COMBAT + STAMINA
+  ============================ */
+
+  let attackCooldown = 0;
+  let stamina = 100;
+  let maxStamina = 100;
+
+  let daggers = [];
+
+  /* ============================
+     UI FUNCTIONS
+  ============================ */
+
+  function updateUpgradeUI() {
+    goldText.textContent = gold;
+    dmgLvlText.textContent = damageLevel;
+    hpLvlText.textContent = hpLevel;
+  }
+
+  function updateHudUI() {
+    goldHud.textContent = gold;
+    levelHud.textContent = level;
+
+    hpBar.style.width = (player.hp / getMaxHp()) * 100 + "%";
+    staminaBar.style.width = (stamina / maxStamina) * 100 + "%";
+
+    if (boss.alive) {
+      bossHpBar.style.width = (boss.hp / boss.hpBase) * 100 + "%";
+    } else {
+      bossHpBar.style.width = "0%";
+    }
+  }
+
+  /* ============================
+     UPGRADE LOGIC
+  ============================ */
+
+  function getDamage() { return player.baseDamage * damageLevel; }
+  function getMaxHp() { return player.maxHpBase * hpLevel; }
+
+  window.buyDamage = function() {
+    if (gold >= 20) {
+      gold -= 20;
+      damageLevel++;
+      updateUpgradeUI();
+    }
+  };
+
+  window.buyHP = function() {
+    if (gold >= 20) {
+      gold -= 20;
+      hpLevel++;
+      player.hp = getMaxHp();
+      updateUpgradeUI();
+    }
+  };
+
+  /* ============================
+     MENU CONTROL
+  ============================ */
+
+  window.startGame = function() {
+    menu.style.display = "none";
+    upgrades.style.display = "none";
+    deathMenu.style.display = "none";
+
+    hud.style.display = "block";
+    canvas.style.display = "block";
+
+    resetGameStats();
+    gameRunning = true;
+  };
+
+  window.openUpgrades = function() {
+    menu.style.display = "none";
+    deathMenu.style.display = "none";
+    upgrades.style.display = "block";
+    hud.style.display = "none";
+    canvas.style.display = "none";
+
+    updateUpgradeUI();
+  };
+
+  window.backToMenu = function() {
+    upgrades.style.display = "none";
+    deathMenu.style.display = "none";
+    hud.style.display = "none";
+    canvas.style.display = "none";
+
+    menu.style.display = "block";
+  };
+
+  window.continueLevel = function() {
+    deathMenu.style.display = "none";
+    hud.style.display = "block";
+    canvas.style.display = "block";
+
+    resetGameStats();
+    gameRunning = true;
+  };
+
+  /* ============================
+     RESET STATS
+  ============================ */
+
+  function resetGameStats() {
+    player.hp = getMaxHp();
+    player.x = 200;
+    player.y = 380;
+    player.z = 0;
+    player.vx = 0;
+    player.vy = 0;
+    player.vz = 0;
+    player.attacking = false;
+    player.attackFrame = 0;
+    player.onGround = false;
+
+    stamina = maxStamina;
+
+    boss.hpBase = 300 + (level - 1) * 150;
+    boss.hp = boss.hpBase;
+    boss.alive = true;
+    boss.x = 650;
+    boss.y = 320;
+    boss.z = 0;
+    boss.attackTimer = 0;
+    boss.daggerTimer = 0;
+    boss.rage = false;
+    boss.speed = 2.4;
+
+    daggers = [];
+
+    updateHudUI();
+  }
+
+  /* ============================
+     ATTACK SYSTEM
+  ============================ */
+
+  function updateAttack() {
+    if (attackCooldown > 0) attackCooldown--;
+    if (!player.attacking && stamina < maxStamina) stamina += 0.5;
+
+    if (keys["j"] && attackCooldown <= 0 && stamina >= 15) {
+      player.attacking = true;
+      player.attackFrame = 0;
+      attackCooldown = 20;
+      stamina -= 15;
     }
 
-    function nextTurn() {
-      gold += income;
-      let eventText = "";
-      let event = Math.floor(Math.random() * 10);
+    if (player.attacking) {
+      player.attackFrame++;
+      if (player.attackFrame > 12) player.attacking = false;
+    }
+  }
 
-      if (event === 0) {
-        let loss = guards > 0 ? gold / 10 : gold / 4;
-        gold -= Math.floor(loss);
-        eventText = "Bandits attacked! Lost " + Math.floor(loss) + " gold.";
-      } else if (event === 1) {
-        if (ships > 0) {
-          let loss = ships * 5;
-          gold -= loss;
-          eventText = "Storm damaged your ships! Lost " + loss + " gold.";
+  /* ============================
+     BOSS DAGGER ATTACK (HARD)
+  ============================ */
+
+  function bossDaggerAttack() {
+    if (!boss.alive) return;
+
+    boss.daggerTimer++;
+
+    let threshold = boss.rage ? 60 : 120;
+
+    if (boss.daggerTimer > threshold) {
+      boss.daggerTimer = 0;
+
+      let angles = boss.rage
+        ? [-0.5, -0.25, 0, 0.25, 0.5]
+        : [-0.3, 0, 0.3];
+
+      angles.forEach(a => {
+        daggers.push({
+          x: boss.x,
+          y: boss.y + 40,
+          z: boss.z,
+          vx: Math.cos(a) * -8,
+          vy: Math.sin(a) * -3,
+          size: 20,
+          alive: true
+        });
+      });
+    }
+  }
+
+  /* ============================
+     DAGGER UPDATE
+  ============================ */
+
+  function updateDaggers() {
+    daggers.forEach(d => {
+      d.x += d.vx;
+      d.y += d.vy;
+
+      if (rect(
+        { x: d.x - 10, y: d.y - 10, w: 20, h: 20 },
+        { x: player.x - 20, y: player.y, w: 40, h: 90 }
+      )) {
+        player.hp -= 20;
+        d.alive = false;
+        player.attacking = false;
+        player.attackFrame = 0;
+
+        if (player.hp <= 0) gameOver();
+      }
+
+      if (d.x < -50 || d.x > canvas.width + 50) d.alive = false;
+    });
+
+    daggers = daggers.filter(d => d.alive);
+  }
+
+  /* ============================
+     MAIN UPDATE
+  ============================ */
+
+  function update() {
+    if (!gameRunning) return;
+
+    updateAttack();
+    bossDaggerAttack();
+    updateDaggers();
+
+    let move = 0;
+    let depth = 0;
+
+    if (keys["a"] || keys["arrowleft"]) move = -1;
+    if (keys["d"] || keys["arrowright"]) move = 1;
+
+    if (keys["w"]) depth = -1;
+    if (keys["s"]) depth = 1;
+
+    player.vx = move * 5;
+    player.vz = depth * 3;
+
+    if (move !== 0) player.facing = move;
+
+    if ((keys[" "] || keys["arrowup"]) && player.onGround) {
+      player.vy = -14;
+      player.onGround = false;
+    }
+
+    player.vy += GRAVITY;
+
+    player.x += player.vx;
+    player.y += player.vy;
+    player.z += player.vz;
+
+    if (player.z < -40) player.z = -40;
+    if (player.z > 40) player.z = 40;
+
+    if (player.y + player.h >= 460) {
+      player.y = 460 - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+
+    // HARD BOSS AI
+    if (boss.alive) {
+      boss.attackTimer++;
+      boss.dashCooldown--;
+
+      // Rage mode
+      if (!boss.rage && boss.hp < boss.hpBase * 0.4) {
+        boss.rage = true;
+        boss.speed = 4;
+      }
+
+      // Track player
+      let dir = Math.sign(player.x - boss.x);
+      boss.x += dir * boss.speed;
+
+      // Dash attack
+      if (boss.dashCooldown <= 0 && Math.abs(player.x - boss.x) < 200) {
+        boss.dashCooldown = boss.rage ? 90 : 150;
+        boss.x += dir * boss.dashSpeed;
+
+        if (Math.abs(player.x - boss.x) < 80) {
+          player.hp -= boss.rage ? 40 : 25;
+          if (player.hp <= 0) gameOver();
         }
-      } else if (event === 2) {
-        let bonus = Math.floor(Math.random() * 200) + 50;
-        gold += bonus;
-        eventText = "Found hidden treasure! +" + bonus + " gold.";
-      } else if (event === 3 && guards > 0) {
-        let bonus = guards * 15;
-        gold += bonus;
-        eventText = "Guards secured bonus treasure! +" + bonus + " gold.";
       }
 
-      document.getElementById("event").innerText = eventText;
-      updateStats();
-    }
+      // Melee attack
+      if (boss.attackTimer > (boss.rage ? 90 : 150)) {
+        boss.attackTimer = 0;
 
-    function openShop() {
-      document.getElementById("shop").style.display = "block";
-    }
+        if (Math.abs(player.x - boss.x) < 120) {
+          player.hp -= boss.rage ? 35 : 25;
+          player.attacking = false;
+          player.attackFrame = 0;
 
-    function closeShop() {
-      document.getElementById("shop").style.display = "none";
-    }
-
-    function buyMine() {
-      if (gold >= 150) {
-        gold -= 150;
-        income += 10;
-        mines++;
-        updateStats();
+          if (player.hp <= 0) gameOver();
+        }
       }
     }
 
-    function buyShip() {
-      if (gold >= 300) {
-        gold -= 300;
-        income += 20;
-        ships++;
-        updateStats();
+    // Player hits boss
+    if (player.attacking && boss.alive) {
+      let range = 70;
+      let hitX = player.x + player.facing * range;
+      let hitbox = { x: hitX - 25, y: player.y + 20, w: 50, h: 40 };
+      let bossBox = { x: boss.x - boss.w / 2, y: boss.y, w: boss.w, h: boss.h };
+
+      if (rect(hitbox, bossBox)) {
+        boss.hp -= getDamage();
+        boss.x += player.facing * 8;
+
+        if (boss.hp <= 0) {
+          boss.alive = false;
+          bossDefeated();
+        }
       }
     }
 
-    function buyGuard() {
-      if (gold >= 200) {
-        gold -= 200;
-        guards++;
-        updateStats();
-      }
+    updateHudUI();
+  }
+
+  /* ============================
+     COLLISION
+  ============================ */
+
+  function rect(a, b) {
+    return (
+      a.x < b.x + b.w &&
+      a.x + a.w > b.x &&
+      a.y < b.y + b.h &&
+      a.y + a.h > b.y
+    );
+  }
+
+  /* ============================
+     BOSS DEFEATED
+  ============================ */
+
+  function bossDefeated() {
+    gold += 40;
+    level++;
+    resetGameStats();
+  }
+
+  /* ============================
+     GAME OVER
+  ============================ */
+
+  function gameOver() {
+    gameRunning = false;
+
+    for (let k in keys) keys[k] = false;
+
+    player.vx = 0;
+    player.vy = 0;
+    player.vz = 0;
+    player.attacking = false;
+    player.attackFrame = 0;
+
+    hud.style.display = "none";
+    deathMenu.style.display = "block";
+  }
+
+  /* ============================
+     DRAWING
+  ============================ */
+
+  function drawBackground() {
+    ctx.fillStyle = "#0a0012";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#1a0030";
+    ctx.beginPath();
+    ctx.moveTo(0, 460);
+    ctx.lineTo(canvas.width, 460);
+    ctx.lineTo(canvas.width, 540);
+    ctx.lineTo(0, 540);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawPlayer() {
+    ctx.save();
+    ctx.translate(player.x, player.y + player.z);
+    ctx.scale(player.facing, 1);
+
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.roundRect(-20, 0, 40, 90, 10);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, -10, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#b300ff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-8, -15);
+    ctx.lineTo(-2, -13);
+    ctx.moveTo(2, -13);
+    ctx.lineTo(8, -15);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#d966ff";
+    ctx.lineWidth = 4;
+    let slash = player.attacking ? 12 : 0;
+
+    ctx.beginPath();
+    ctx.moveTo(15, 20);
+    ctx.lineTo(35 + slash, 10);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-15, 20);
+    ctx.lineTo(-35 - slash, 10);
+    ctx.stroke();
+
+    if (player.attacking) {
+      ctx.strokeStyle = "rgba(179,0,255,0.6)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(35, 10);
+      ctx.lineTo(55, -10);
+      ctx.moveTo(-35, 10);
+      ctx.lineTo(-55, -10);
+      ctx.stroke();
     }
 
-    updateStats();
-  </script>
+    ctx.restore();
+  }
+
+  function drawBoss() {
+    if (!boss.alive) return;
+
+    ctx.save();
+    ctx.translate(boss.x, boss.y + boss.z);
+
+    ctx.fillStyle = "#2a0030";
+    ctx.beginPath();
+    ctx.roundRect(-70, 0, 140, 180, 20);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, -20, 35, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#ff00aa";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-15, -30);
+    ctx.lineTo(-5, -28);
+    ctx.moveTo(5, -28);
+    ctx.lineTo(15, -30);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawDaggers() {
+    daggers.forEach(d => {
+      ctx.save();
+      ctx.translate(d.x, d.y + d.z);
+
+      ctx.fillStyle = "#b300ff";
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-10, 5);
+      ctx.lineTo(0, -20);
+      ctx.lineTo(10, 5);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    });
+  }
+
+  function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBackground();
+
+    if (gameRunning) {
+      update();
+      drawBoss();
+      drawDaggers();
+      drawPlayer();
+    }
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // roundRect polyfill (for older browsers)
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+      if (w < 2 * r) r = w / 2;
+      if (h < 2 * r) r = h / 2;
+      this.beginPath();
+      this.moveTo(x + r, y);
+      this.arcTo(x + w, y, x + w, y + h, r);
+      this.arcTo(x + w, y + h, x, y + h, r);
+      this.arcTo(x, y + h, x, y, r);
+      this.arcTo(x, y, x + w, y, r);
+      this.closePath();
+      return this;
+    };
+  }
+
+  // start the loop
+  gameLoop();
+}; // end of window.onload
+</script>
 </body>
 </html>
