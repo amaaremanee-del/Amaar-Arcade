@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Shadow Assassin – INSANE but Fair</title>
+<style>
+  body { margin:0; background:#0a0012; color:#fff; overflow:hidden; font-family:Arial; }
+  #gameCanvas { display:none; background:linear-gradient(#0a0012,#1a0030); }
+  #menu, #upgrades, #deathMenu {
+    position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%); text-align:center;
+  }
+  #hud { position:absolute; top:10px; left:10px; display:none; }
+  .bar { width:200px; height:8px; background:#333; margin-bottom:6px; border-radius:4px; }
+  .bar-fill { height:100%; background:#b300ff; }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="960" height="540"></canvas>
+
+<div id="menu">
+  <h1>SHADOW ASSASSIN</h1>
+  <button onclick="startGame()">Start Game</button>
+  <button onclick="openUpgrades()">Upgrades</button>
+</div>
+
+<div id="upgrades" style="display:none;">
+  <h1>Upgrades</h1>
+  Gold: <span id="goldText">0</span><br><br>
+
+  Damage Level: <span id="dmgLvlText">1</span><br>
+  <button onclick="buyDamage()">Upgrade Damage (<span id="dmgCost">20</span> gold)</button><br><br>
+
+  Max HP Level: <span id="hpLvlText">1</span><br>
+  <button onclick="buyHP()">Upgrade Max HP (<span id="hpCost">20</span> gold)</button><br><br>
+
+  <button onclick="backToMenu()">Back</button>
+</div>
+
+<div id="deathMenu" style="display:none;">
+  <h1>You Died</h1>
+  <button onclick="continueLevel()">Continue</button>
+  <button onclick="openUpgrades()">Upgrades</button>
+</div>
+
+<div id="hud">
+  <div class="bar"><div id="hpBar" class="bar-fill"></div></div>
+  <div class="bar"><div id="staminaBar" class="bar-fill" style="background:#6a00ff;"></div></div>
+  <div class="bar"><div id="bossHpBar" class="bar-fill" style="background:#ff00aa;"></div></div>
+
+  Gold: <span id="goldHud">0</span><br>
+  Level: <span id="levelHud">1</span><br>
+  WASD = move | Space = jump | J = attack
+</div>
+
+<script>
+window.onload = function() {
+
+  /* DOM */
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const menu = document.getElementById("menu");
+  const upgrades = document.getElementById("upgrades");
+  const hud = document.getElementById("hud");
+  const deathMenu = document.getElementById("deathMenu");
+
+  const goldText = document.getElementById("goldText");
+  const dmgLvlText = document.getElementById("dmgLvlText");
+  const hpLvlText = document.getElementById("hpLvlText");
+
+  const dmgCostText = document.getElementById("dmgCost");
+  const hpCostText = document.getElementById("hpCost");
+
+  const goldHud = document.getElementById("goldHud");
+  const levelHud = document.getElementById("levelHud");
+
+  const hpBar = document.getElementById("hpBar");
+  const staminaBar = document.getElementById("staminaBar");
+  const bossHpBar = document.getElementById("bossHpBar");
+
+  /* INPUT */
+  const keys = {};
+  document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+  document.addEventListener("keyup",   e => keys[e.key.toLowerCase()] = false);
+
+  let gameRunning = false;
+
+  /* STATS */
+  let gold = 0;
+  let damageLevel = 1;
+  let hpLevel = 1;
+
+  let dmgCost = 20;
+  let hpCost = 20;
+
+  let player = {
+    x: 200, y: 380, z: 0,
+    vx: 0, vy: 0, vz: 0,
+    w: 40, h: 90,
+    facing: 1,
+    onGround: false,
+    attacking: false,
+    attackFrame: 0,
+    baseDamage: 10,
+    maxHpBase: 100,
+    hp: 100
+  };
+
+  let boss = {
+    x: 650, y: 320, z: 0,
+    w: 140, h: 180,
+    hpBase: 300,
+    hp: 300,
+    alive: true,
+    attackTimer: 0,
+    daggerTimer: 0,
+    rage: false,
+    baseSpeed: 2.4,
+    baseDashSpeed: 12,
+    speed: 2.4,
+    dashSpeed: 12,
+    dashCooldown: 0
+  };
+
+  let level = 1;
+  const GRAVITY = 0.7;
+
+  /* COMBAT */
+  let attackCooldown = 0;
+  let stamina = 100;
+  let maxStamina = 100;
+
+  let daggers = [];
+
+  /* SCALING */
+  function getMaxHp() {
+    return player.maxHpBase * (1 + hpLevel * 0.35);
+  }
+
+  function getDamage() {
+    return player.baseDamage * damageLevel;
+  }
+
+  function getBossHpBase() {
+    return 300 + (level - 1) * 180;
+  }
+
+  function getBossSpeed() {
+    return boss.baseSpeed + level * 0.07;
+  }
+
+  function getBossDashSpeed() {
+    return boss.baseDashSpeed + level * 0.15;
+  }
+
+  function getBossMeleeDamage() {
+    return 50 + Math.floor(level * 4.5);
+  }
+
+  function getBossDashDamage() {
+    return 80 + Math.floor(level * 6.2);
+  }
+
+  function getBossDaggerDamage() {
+    return 40 + Math.floor(level * 4.0);
+  }
+
+  /* UI */
+  function updateUpgradeUI() {
+    goldText.textContent = gold;
+    dmgLvlText.textContent = damageLevel;
+    hpLvlText.textContent = hpLevel;
+    dmgCostText.textContent = dmgCost;
+    hpCostText.textContent = hpCost;
+  }
+
+  function updateHudUI() {
+    goldHud.textContent = gold;
+    levelHud.textContent = level;
+
+    hpBar.style.width = (player.hp / getMaxHp()) * 100 + "%";
+    staminaBar.style.width = (stamina / maxStamina) * 100 + "%";
+
+    if (boss.alive) bossHpBar.style.width = (boss.hp / boss.hpBase) * 100 + "%";
+    else bossHpBar.style.width = "0%";
+  }
+
+  /* UPGRADES */
+  window.buyDamage = function() {
+    if (gold >= dmgCost) {
+      gold -= dmgCost;
+      damageLevel++;
+      dmgCost += 20;
+      updateUpgradeUI();
+    }
+  };
+
+  window.buyHP = function() {
+    if (gold >= hpCost) {
+      gold -= hpCost;
+      hpLevel++;
+      hpCost += 20;
+      player.hp = getMaxHp();
+      updateUpgradeUI();
+    }
+  };
+
+  /* MENUS */
+  window.startGame = function() {
+    menu.style.display = "none";
+    upgrades.style.display = "none";
+    deathMenu.style.display = "none";
+
+    hud.style.display = "block";
+    canvas.style.display = "block";
+
+    resetGameStats();
+    gameRunning = true;
+  };
+
+  window.openUpgrades = function() {
+    menu.style.display = "none";
+    deathMenu.style.display = "none";
+    upgrades.style.display = "block";
+    hud.style.display = "none";
+    canvas.style.display = "none";
+
+    updateUpgradeUI();
+  };
+
+  window.backToMenu = function() {
+    upgrades.style.display = "none";
+    deathMenu.style.display = "none";
+    hud.style.display = "none";
+    canvas.style.display = "none";
+
+    menu.style.display = "block";
+  };
+
+  window.continueLevel = function() {
+    deathMenu.style.display = "none";
+    hud.style.display = "block";
+    canvas.style.display = "block";
+
+    resetGameStats();
+    gameRunning = true;
+  };
+
+  /* RESET */
+  function resetGameStats() {
+    player.hp = getMaxHp();
+    player.x = 200;
+    player.y = 380;
+    player.z = 0;
+    player.vx = 0;
+    player.vy = 0;
+    player.vz = 0;
+    player.attacking = false;
+    player.attackFrame = 0;
+    player.onGround = false;
+
+    stamina = maxStamina;
+
+    boss.hpBase = getBossHpBase();
+    boss.hp = boss.hpBase;
+    boss.alive = true;
+    boss.x = 650;
+    boss.y = 320;
+    boss.z = 0;
+    boss.attackTimer = 0;
+    boss.daggerTimer = 0;
+    boss.rage = false;
+    boss.speed = getBossSpeed();
+    boss.dashSpeed = getBossDashSpeed() * 1.2;
+    boss.dashCooldown = 0;
+
+    daggers = [];
+
+    updateHudUI();
+  }
+
+  /* ATTACK SYSTEM */
+  function updateAttack() {
+    if (attackCooldown > 0) attackCooldown--;
+    if (!player.attacking && stamina < maxStamina) stamina += 0.5;
+
+    if (keys["j"] && attackCooldown <= 0 && stamina >= 15) {
+      player.attacking = true;
+      player.attackFrame = 0;
+      attackCooldown = 20;
+      stamina -= 15;
+    }
+
+    if (player.attacking) {
+      player.attackFrame++;
+      if (player.attackFrame > 12) player.attacking = false;
+    }
+  }
+
+  /* BOSS DAGGERS */
+  function bossDaggerAttack() {
+    if (!boss.alive) return;
+
+    boss.daggerTimer++;
+
+    let baseThreshold = boss.rage ? 70 : 120;
+    let threshold = Math.max(55, baseThreshold - level * 0.6);
+
+    if (boss.daggerTimer > threshold) {
+      boss.daggerTimer = 0;
+
+      let patternRoll = Math.random();
+
+      if (!boss.rage) {
+        if (patternRoll < 0.4) spawnFanDaggers(false);
+        else if (patternRoll < 0.8) spawnRainDaggers(false);
+        else spawnStraightShot(false);
+      } else {
+        if (patternRoll < 0.4) spawnFanDaggers(true);
+        else if (patternRoll < 0.8) spawnRainDaggers(true);
+        else spawnStraightShot(true);
+      }
+    }
+  }
+
+  function spawnFanDaggers(rage) {
+    let angles = rage
+      ? [-0.6, -0.3, 0, 0.3, 0.6]
+      : [-0.3, 0, 0.3];
+
+    angles.forEach(a => {
+      daggers.push({
+        x: boss.x,
+        y: boss.y + 40,
+        z: boss.z,
+        vx: Math.cos(a) * (-9 - level * 0.25),
+        vy: Math.sin(a) * (-4 - level * 0.12),
+        size: 20,
+        dmg: getBossDaggerDamage() * (rage ? 1.35 : 1),
+        alive: true
+      });
+    });
+  }
+
+  function spawnRainDaggers(rage) {
+    let count = rage ? 7 : 5;
+    for (let i = 0; i < count; i++) {
+      daggers.push({
+        x: canvas.width - 80 - i * 60,
+        y: 0,
+        z: 0,
+        vx: -1.4 - level * 0.03,
+        vy: 4.2 + i * 0.35 + level * 0.05,
+        size: 18,
+        dmg: getBossDaggerDamage() * (rage ? 1.35 : 1),
+        alive: true
+      });
+    }
+  }
+
+  function spawnStraightShot(rage) {
+    daggers.push({
+      x: boss.x,
+      y: player.y,
+      z: boss.z,
+      vx: (-10 - level * 0.25),
+      vy: 0,
+      size: 22,
+      dmg: getBossDaggerDamage() * (rage ? 1.35 : 1),
+      alive: true
+    });
+  }
+
+  function updateDaggers() {
+    daggers.forEach(d => {
+      d.x += d.vx;
+      d.y += d.vy;
+
+      if (rect(
+        { x: d.x - 10, y: d.y - 10, w: 20, h: 20 },
+        { x: player.x - 20, y: player.y, w: 40, h: 90 }
+      )) {
+        player.hp -= d.dmg;
+        d.alive = false;
+        player.attacking = false;
+        player.attackFrame = 0;
+
+        if (player.hp <= 0) gameOver();
+      }
+
+      if (d.x < -80 || d.x > canvas.width + 80 || d.y > canvas.height + 80) d.alive = false;
+    });
+
+    daggers = daggers.filter(d => d.alive);
+  }
+
+  /* MAIN UPDATE */
+  function update() {
+    if (!gameRunning) return;
+
+    updateAttack();
+    bossDaggerAttack();
+    updateDaggers();
+
+    let move = 0;
+    let depth = 0;
+
+    if (keys["a"] || keys["arrowleft"]) move = -1;
+    if (keys["d"] || keys["arrowright"]) move = 1;
+
+    if (keys["w"]) depth = -1;
+    if (keys["s"]) depth = 1;
+
+    player.vx = move * 5;
+    player.vz = depth * 3;
+
+    if (move !== 0) player.facing = move;
+
+    if ((keys[" "] || keys["arrowup"]) && player.onGround) {
+      player.vy = -14;
+      player.onGround = false;
+    }
+
+    player.vy += GRAVITY;
+
+    player.x += player.vx;
+    player.y += player.vy;
+    player.z += player.vz;
+
+    if (player.z < -40) player.z = -40;
+    if (player.z > 40) player.z = 40;
+
+    if (player.y + player.h >= 460) {
+      player.y = 460 - player.h;
+      player.vy = 0;
+      player.onGround = true;
+    }
+
+    /* BOSS AI */
+    if (boss.alive) {
+      boss.attackTimer++;
+      boss.dashCooldown--;
+
+      if (!boss.rage && boss.hp < boss.hpBase * 0.5) {
+        boss.rage = true;
+        boss.speed *= 1.2;
+        boss.dashSpeed *= 1.45;
+      }
+
+      let dir = Math.sign(player.x - boss.x);
+      boss.x += dir * boss.speed;
+
+      if (boss.dashCooldown <= 0 && Math.abs(player.x - boss.x) < 230) {
+        boss.dashCooldown = boss.rage ? 80 : 120;
+        boss.x += dir * boss.dashSpeed;
+
+        if (Math.abs(player.x - boss.x) < 95) {
+          let dashDmg = getBossDashDamage();
+          if (boss.rage) dashDmg = Math.floor(dashDmg * 1.45);
+          player.hp -= dashDmg;
+          if (player.hp <= 0) gameOver();
+        }
+      }
+
+      let baseAttackInterval = boss.rage ? 100 : 140;
+      let attackInterval = Math.max(45, baseAttackInterval - level * 0.9);
+
+      if (boss.attackTimer > attackInterval) {
+        boss.attackTimer = 0;
+
+        if (Math.abs(player.x - boss.x) < 130) {
+          let meleeDmg = getBossMeleeDamage();
+          if (boss.rage) meleeDmg = Math.floor(meleeDmg * 1.35);
+          player.hp -= meleeDmg;
+          player.attacking = false;
+          player.attackFrame = 0;
+
+          if (player.hp <= 0) gameOver();
+        }
+      }
+    }
+
+    /* PLAYER HITS BOSS — GOLD PER HIT (0.2x) */
+    if (player.attacking && boss.alive) {
+      let range = 70;
+      let hitX = player.x + player.facing * range;
+      let hitbox = { x: hitX - 25, y: player.y + 20, w: 50, h: 40 };
+      let bossBox = { x: boss.x - boss.w / 2, y: boss.y, w: boss.w, h: boss.h };
+
+      if (rect(hitbox, bossBox)) {
+        gold += Math.floor(getDamage() * 0.2);
+        boss.hp -= getDamage();
+        boss.x += player.facing * 8;
+
+        if (boss.hp <= 0) {
+          boss.alive = false;
+          bossDefeated();
+        }
+      }
+    }
+
+    updateHudUI();
+  }
+
+  /* COLLISION */
+  function rect(a, b) {
+    return (
+      a.x < b.x + b.w &&
+      a.x + a.w > b.x &&
+      a.y < b.y + b.h &&
+      a.y + a.h > b.y
+    );
+  }
+
+  /* BOSS DEFEATED */
+  function bossDefeated() {
+    gold += 40;
+    if (level < 100) level++;
+    resetGameStats();
+  }
+
+  /* GAME OVER */
+  function gameOver() {
+    gameRunning = false;
+
+    for (let k in keys) keys[k] = false;
+
+    player.vx = 0;
+    player.vy = 0;
+    player.vz = 0;
+    player.attacking = false;
+    player.attackFrame = 0;
+
+    hud.style.display = "none";
+    deathMenu.style.display = "block";
+  }
+
+  /* DRAWING */
+  function drawBackground() {
+    ctx.fillStyle = "#0a0012";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#1a0030";
+    ctx.beginPath();
+    ctx.moveTo(0, 460);
+    ctx.lineTo(canvas.width, 460);
+    ctx.lineTo(canvas.width, 540);
+    ctx.lineTo(0, 540);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawPlayer() {
+    ctx.save();
+    ctx.translate(player.x, player.y + player.z);
+    ctx.scale(player.facing, 1);
+
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.roundRect(-20, 0, 40, 90, 10);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, -10, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#b300ff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-8, -15);
+    ctx.lineTo(-2, -13);
+    ctx.moveTo(2, -13);
+    ctx.lineTo(8, -15);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#d966ff";
+    ctx.lineWidth = 4;
+    let slash = player.attacking ? 12 : 0;
+
+    ctx.beginPath();
+    ctx.moveTo(15, 20);
+    ctx.lineTo(35 + slash, 10);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-15, 20);
+    ctx.lineTo(-35 - slash, 10);
+    ctx.stroke();
+
+    if (player.attacking) {
+      ctx.strokeStyle = "rgba(179,0,255,0.6)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(35, 10);
+      ctx.lineTo(55, -10);
+      ctx.moveTo(-35, 10);
+      ctx.lineTo(-55, -10);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawBoss() {
+    if (!boss.alive) return;
+
+    ctx.save();
+    ctx.translate(boss.x, boss.y + boss.z);
+
+    ctx.fillStyle = boss.rage ? "#3a0018" : "#2a0030";
+    ctx.beginPath();
+    ctx.roundRect(-70, 0, 140, 180, 20);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(0, -20, 35, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = boss.rage ? "#ff3366" : "#ff00aa";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-15, -30);
+    ctx.lineTo(-5, -28);
+    ctx.moveTo(5, -28);
+    ctx.lineTo(15, -30);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawDaggers() {
+    daggers.forEach(d => {
+      ctx.save();
+      ctx.translate(d.x, d.y + d.z);
+
+      ctx.fillStyle = "#b300ff";
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-10, 5);
+      ctx.lineTo(0, -20);
+      ctx.lineTo(10, 5);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    });
+  }
+
+  function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawBackground();
+
+    if (gameRunning) {
+      update();
+      drawBoss();
+      drawDaggers();
+      drawPlayer();
+    }
+
+    requestAnimationFrame(gameLoop);
+  }
+
+  // roundRect polyfill
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
+      if (w < 2 * r) r = w / 2;
+      if (h < 2 * r) r = h / 2;
+      this.beginPath();
+      this.moveTo(x + r, y);
+      this.arcTo(x + w, y, x + w, y + h, r);
+      this.arcTo(x + w, y + h, x, y + h, r);
+      this.arcTo(x, y + h, x, y, r);
+      this.arcTo(x, y, x + w, y, r);
+      this.closePath();
+      return this;
+    };
+  }
+
+  gameLoop();
+};
+</script>
+</body>
+</html>
